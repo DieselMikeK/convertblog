@@ -204,12 +204,24 @@ def remove_empty_meta_and_images(soup):
                 pass
 
 def fix_google_redirect_links(soup):
-    """Replace 'https://www.google.com/url?q=' with the real destination URL."""
+    """Replace 'https://www.google.com/url?q=' with the real destination URL.
+    Skips YouTube links to preserve URL encoding."""
     for a in soup.find_all("a", href=True):
         href = a["href"]
         match = re.search(r"https://www\.google\.com/url\?q=([^&]+)", href)
         if match:
-            a["href"] = match.group(1)
+            decoded_url = match.group(1)
+            # Skip YouTube links to preserve their URL encoding
+            if 'youtube.com' not in decoded_url and 'youtu.be' not in decoded_url:
+                a["href"] = decoded_url
+
+def fix_specific_links(soup):
+    """Replace specific URLs with updated versions."""
+    for a in soup.find_all("a", href=True):
+        href = a["href"]
+        # Replace old contact page URL with new one
+        if href == "https://www.dieselpowerproducts.com/t-contact.aspx":
+            a["href"] = "https://dieselpowerproducts.com/pages/contact-us"
 
 def remove_empty_paragraphs(soup):
     """Remove <p> tags that are empty or contain only nbsp."""
@@ -497,7 +509,7 @@ def fix_strong_in_list_items(soup):
                     # Get current strong text
                     strong_text = first_child.get_text()
 
-                    # Add separator to strong text if it doesn't already have it
+                    # Add separator to strong tag if it doesn't already have it
                     if not strong_text.endswith(separator):
                         first_child.clear()
                         first_child.string = strong_text + separator
@@ -507,8 +519,16 @@ def fix_strong_in_list_items(soup):
 
                     # Ensure single space after the separator
                     remaining_text = remaining_text.lstrip()
-                    if remaining_text and not remaining_text.startswith('\n'):
-                        remaining_text = ' ' + remaining_text
+                    # Always add a space if there's content OR if the next element is a tag (like <a>)
+                    if remaining_text:
+                        if not remaining_text.startswith('\n'):
+                            remaining_text = ' ' + remaining_text
+                    else:
+                        # Empty after removing separator - check if next sibling after text is a tag
+                        next_elem = next_sibling.next_sibling if next_sibling else None
+                        if next_elem and hasattr(next_elem, 'name'):
+                            # Next element is a tag, ensure there's a space
+                            remaining_text = ' '
 
                     next_sibling.replace_with(remaining_text)
 
@@ -521,6 +541,129 @@ def fix_strong_in_list_items(soup):
 
                     if cleaned_text != next_sibling:
                         next_sibling.replace_with(cleaned_text)
+
+            # Check if next sibling (skipping empty text nodes) is a link tag
+            check_sibling = first_child.next_sibling
+            while check_sibling:
+                if isinstance(check_sibling, str):
+                    # If it's a non-empty text node, we're done checking
+                    if check_sibling.strip():
+                        break
+                    # Skip empty text nodes and keep looking
+                    check_sibling = check_sibling.next_sibling
+                elif hasattr(check_sibling, 'name') and check_sibling.name == 'a':
+                    # Found an <a> tag - ensure there's a space before it
+                    from bs4 import NavigableString
+                    # Check if there's already a space
+                    prev = check_sibling.previous_sibling
+                    has_space = prev and isinstance(prev, str) and prev.strip() == ''
+                    # If previous sibling is the strong tag directly, add space
+                    if prev == first_child or not has_space:
+                        check_sibling.insert_before(NavigableString(' '))
+                    break
+                else:
+                    # Hit another tag that's not a link
+                    break
+
+def normalize_link_spacing(soup):
+    """
+    Normalize spacing around <a> tags to ensure consistent formatting:
+    - Single space before link if preceded by text/punctuation
+    - Single space after link if followed by text
+    - Replace nbsp with regular spaces
+    - Handle links inside strong tags and between strong tags
+    """
+    import re
+    from bs4 import NavigableString
+
+    for link in soup.find_all('a'):
+        # Check if link is inside a strong tag
+        parent_strong = link.parent if link.parent and link.parent.name == 'strong' else None
+
+        if parent_strong:
+            # Handle spacing around the strong tag that contains the link
+            prev_sibling = parent_strong.previous_sibling
+            if prev_sibling and isinstance(prev_sibling, str):
+                # Replace nbsp with regular space
+                cleaned = prev_sibling.replace('\xa0', ' ')
+                cleaned = re.sub(r' +', ' ', cleaned)
+
+                if cleaned:
+                    cleaned = cleaned.rstrip()
+                    if cleaned and not cleaned.endswith('\n'):
+                        cleaned = cleaned + ' '
+
+                    if cleaned != prev_sibling:
+                        prev_sibling.replace_with(cleaned)
+            elif prev_sibling and hasattr(prev_sibling, 'name') and prev_sibling.name == 'strong':
+                # Previous sibling is also a strong tag, ensure space between them
+                # Check if there's a text node between them
+                if prev_sibling.next_sibling == parent_strong:
+                    # No space between, insert one
+                    parent_strong.insert_before(NavigableString(' '))
+
+            next_sibling = parent_strong.next_sibling
+            if next_sibling and isinstance(next_sibling, str):
+                cleaned = next_sibling.replace('\xa0', ' ')
+                cleaned = re.sub(r' +', ' ', cleaned)
+
+                if cleaned:
+                    cleaned = cleaned.lstrip()
+                    if cleaned and not cleaned[0] in '.,;:!?)}\n':
+                        cleaned = ' ' + cleaned
+
+                    if cleaned != next_sibling:
+                        next_sibling.replace_with(cleaned)
+            elif next_sibling and hasattr(next_sibling, 'name') and next_sibling.name == 'strong':
+                # Next sibling is also a strong tag, ensure space between them
+                if parent_strong.next_sibling == next_sibling:
+                    # No space between, insert one
+                    parent_strong.insert_after(NavigableString(' '))
+        else:
+            # Link is not inside a strong tag - handle normally
+            prev_sibling = link.previous_sibling
+            if prev_sibling and isinstance(prev_sibling, str):
+                # Replace nbsp with regular space
+                cleaned = prev_sibling.replace('\xa0', ' ')
+                # Collapse multiple spaces
+                cleaned = re.sub(r' +', ' ', cleaned)
+
+                # If there's text before the link, ensure single space at the end
+                # Store original to check if it was just whitespace
+                was_just_whitespace = cleaned.strip() == ''
+
+                if cleaned and not was_just_whitespace:
+                    # Remove trailing spaces
+                    cleaned = cleaned.rstrip()
+                    # Add single space if there's actual content
+                    if cleaned and not cleaned.endswith('\n'):
+                        cleaned = cleaned + ' '
+
+                    if cleaned != prev_sibling:
+                        prev_sibling.replace_with(cleaned)
+                elif was_just_whitespace:
+                    # Previous sibling is just whitespace - preserve as single space
+                    if prev_sibling != ' ':
+                        prev_sibling.replace_with(' ')
+
+            # Process next sibling
+            next_sibling = link.next_sibling
+            if next_sibling and isinstance(next_sibling, str):
+                # Replace nbsp with regular space
+                cleaned = next_sibling.replace('\xa0', ' ')
+                # Collapse multiple spaces
+                cleaned = re.sub(r' +', ' ', cleaned)
+
+                # If there's text after the link, ensure single space at the start
+                if cleaned:
+                    # Remove leading spaces
+                    cleaned = cleaned.lstrip()
+                    # Add single space if there's actual content and it doesn't start with punctuation or newline
+                    if cleaned and not cleaned[0] in '.,;:!?)}\n':
+                        cleaned = ' ' + cleaned
+
+                    if cleaned != next_sibling:
+                        next_sibling.replace_with(cleaned)
 
 def clean_html(raw_html):
     soup = BeautifulSoup(raw_html, "html.parser")
@@ -535,6 +678,7 @@ def clean_html(raw_html):
     preserve_list_structure(soup)
     remove_empty_meta_and_images(soup)
     fix_google_redirect_links(soup)
+    fix_specific_links(soup)
     remove_empty_paragraphs(soup)
     remove_notes_section(soup)
     remove_trailing_hr(soup)
@@ -545,6 +689,7 @@ def clean_html(raw_html):
     remove_all_empty_tags(soup)  # Final cleanup pass to remove all empty tags
     fix_strong_tag_spacing(soup)  # Run after prettify won't interfere
     fix_strong_in_list_items(soup)  # Ensure space after strong tags in list items
+    normalize_link_spacing(soup)  # Ensure consistent spacing around links
 
     # Use str() instead of prettify() to avoid adding extra whitespace
     html_output = str(soup)
@@ -554,7 +699,7 @@ def clean_html(raw_html):
 
 def convert_docx_to_html(drive_service, input_path, output_folder, raw_folder):
     filename = os.path.basename(input_path)
-    print(f"\n📤 Uploading {filename} to Google Drive...")
+    print(f"\nUploading {filename} to Google Drive...")
 
     file_metadata = {"name": filename, "mimeType": "application/vnd.google-apps.document"}
     media = MediaFileUpload(
@@ -585,7 +730,7 @@ def convert_docx_to_html(drive_service, input_path, output_folder, raw_folder):
     raw_output_path = os.path.join(raw_folder, f"{os.path.splitext(filename)[0]}.html")
     with open(raw_output_path, "w", encoding="utf-8") as f:
         f.write(html_content)
-    print(f"📄 Saved raw HTML → {raw_output_path}")
+    print(f"Saved raw HTML -> {raw_output_path}")
 
     # Clean and save cleaned HTML
     cleaned_html = clean_html(html_content)
@@ -596,7 +741,7 @@ def convert_docx_to_html(drive_service, input_path, output_folder, raw_folder):
     with open(output_path, "w", encoding="utf-8") as f:
         f.write(cleaned_html)
 
-    print(f"✅ Saved cleaned HTML → {output_path}")
+    print(f"Saved cleaned HTML -> {output_path}")
 
 # ==== MAIN ====
 
@@ -612,10 +757,10 @@ def main():
     os.makedirs(raw_folder, exist_ok=True)
 
     if not os.path.exists(input_folder):
-        print(f"❌ Error: 'todo' folder not found at {input_folder}")
+        print(f"Error: 'todo' folder not found at {input_folder}")
         return
 
-    print("🧩 Starting Google Docs → HTML export...")
+    print("Starting Google Docs -> HTML export...")
 
     for filename in os.listdir(input_folder):
         if filename.lower().endswith(".docx"):
@@ -623,11 +768,11 @@ def main():
             try:
                 convert_docx_to_html(drive_service, input_path, output_folder, raw_folder)
             except Exception as e:
-                print(f"❌ Error converting {filename}: {e}")
+                print(f"Error converting {filename}: {e}")
 
-    print("\n✅ All files processed!")
-    print(f"📁 Raw HTML: {raw_folder}")
-    print(f"📁 Cleaned HTML: {output_folder}")
+    print("\nAll files processed!")
+    print(f"Raw HTML: {raw_folder}")
+    print(f"Cleaned HTML: {output_folder}")
 
 if __name__ == "__main__":
     main()
