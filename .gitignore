@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# Google OAuth credentials and tokens
+client_secret.json
+token.pickle
+
+# Output folders
+output_html/
+raw_html/
+
+# Input files (docx files in todo folder)
+todo/*.docx
+
+# Debug scripts
+debug_*.py
+test_*.py
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
