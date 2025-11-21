@@ -45,6 +45,7 @@ def remove_everything_before_marker(soup):
     """
     Remove everything above and including the 'Begin writing the article below the line break' marker
     and the <hr> that follows it.
+    Returns True if marker was found, False if this is an unformatted document.
     """
     marker_re = re.compile(r"begin writing the article below the line break", re.I)
     marker_node = None
@@ -52,7 +53,7 @@ def remove_everything_before_marker(soup):
         marker_node = text_node
         break
     if not marker_node:
-        return
+        return False  # No marker found - this is an unformatted document
 
     # Find the paragraph containing the marker
     container = marker_node.parent
@@ -100,6 +101,8 @@ def remove_everything_before_marker(soup):
             container.extract()
         except Exception:
             pass
+
+    return True  # Marker was found and processed
 
 def convert_bold_italic_spans(soup):
     """
@@ -162,6 +165,105 @@ def normalize_heading_markers(soup):
                 text_node.replace_with(new_tag)
         else:
             text_node.replace_with(new_tag)
+
+def process_unformatted_document(soup):
+    """
+    Process documents without the 'Begin writing' marker.
+    These documents have:
+    - First paragraph with bold text (usually 13pt) as title - should be removed
+    - Other paragraphs that are ENTIRELY bold 13pt text as H2 headings
+    - Mixed paragraphs with bold 13pt text embedded in regular text - split them
+    - Regular paragraphs (including those with partial bold text) as <p> tags
+    """
+    # Track if we've removed the title yet
+    title_removed = False
+
+    # Find all paragraphs and check for bold 13pt text
+    for p in list(soup.find_all('p')):
+        # Get all text content from the paragraph
+        paragraph_full_text = p.get_text(strip=True)
+
+        if not paragraph_full_text:
+            continue
+
+        # Get all spans in the paragraph
+        all_spans = p.find_all('span')
+
+        # Collect text from bold 13pt spans and regular spans
+        bold_13pt_spans = []
+        regular_spans = []
+
+        for span in all_spans:
+            style = span.get('style', '')
+            span_text = span.get_text(strip=True)
+
+            if not span_text:
+                continue
+
+            # Check if this span is bold and 13pt (or close to it)
+            is_bold = 'font-weight:700' in style or 'font-weight: 700' in style
+            is_large = 'font-size:13pt' in style or 'font-size: 13pt' in style or 'font-size:14pt' in style
+
+            if is_bold and is_large:
+                bold_13pt_spans.append((span, span_text))
+            else:
+                regular_spans.append((span, span_text))
+
+        # If there are no bold 13pt spans, skip this paragraph
+        if not bold_13pt_spans:
+            continue
+
+        combined_bold_text = ' '.join([text for _, text in bold_13pt_spans]).strip()
+        combined_regular_text = ' '.join([text for _, text in regular_spans]).strip()
+
+        # Case 1: Paragraph is ALL or mostly (>90%) bold 13pt text - it's a standalone heading
+        if len(combined_bold_text) >= len(paragraph_full_text) * 0.9:
+            if not title_removed:
+                # This is the title paragraph - remove it entirely
+                try:
+                    p.decompose()
+                    title_removed = True
+                except Exception:
+                    pass
+            else:
+                # This is a section heading - convert to H2
+                h2 = soup.new_tag('h2')
+                h2.string = combined_bold_text
+                try:
+                    p.replace_with(h2)
+                except Exception:
+                    pass
+
+        # Case 2: Paragraph has BOTH bold 13pt text AND regular text - split it
+        elif combined_regular_text and combined_bold_text:
+            # Check if title has been removed yet
+            if not title_removed:
+                # First mixed paragraph - just remove the title part and keep the rest
+                # Create new paragraph with just the regular text
+                new_p = soup.new_tag('p')
+                new_p.string = combined_regular_text
+                try:
+                    p.replace_with(new_p)
+                    title_removed = True
+                except Exception:
+                    pass
+            else:
+                # Split into heading + paragraph
+                # Create heading
+                h2 = soup.new_tag('h2')
+                h2.string = combined_bold_text
+
+                # Create new paragraph with regular text
+                new_p = soup.new_tag('p')
+                new_p.string = combined_regular_text
+
+                try:
+                    # Insert heading before current paragraph
+                    p.insert_before(h2)
+                    # Replace current paragraph with new paragraph containing just regular text
+                    p.replace_with(new_p)
+                except Exception:
+                    pass
 
 def flatten_nested_headings(soup):
     """Flatten nested headings like <h4><h1>...</h1></h4>."""
@@ -665,12 +767,433 @@ def normalize_link_spacing(soup):
                     if cleaned != next_sibling:
                         next_sibling.replace_with(cleaned)
 
+def split_paragraphs_at_double_br(soup):
+    """
+    Split paragraphs that contain <br><br> into separate paragraph elements.
+    This handles Google Docs HTML export quirk where paragraph breaks are
+    represented as double line breaks within a single <p> tag.
+    """
+    import re
+    body = soup.body if soup.body else soup
+
+    for p in list(body.find_all('p')):
+        # Get the HTML content as a string
+        html_content = str(p)
+
+        # Check if this paragraph contains <br> tags
+        if '<br' not in html_content.lower():
+            continue
+
+        # Look for patterns like: <br><br>, <br/><br/>, <br> <br>, <br>\n<br>, etc.
+        if not re.search(r'<br\s*/?\s*>\s*<br\s*/?\s*>', html_content, re.IGNORECASE):
+            continue
+
+        # Use regex to split on double <br> patterns
+        parts = re.split(r'<br\s*/?\s*>\s*<br\s*/?\s*>', html_content, flags=re.IGNORECASE)
+
+        if len(parts) <= 1:
+            continue
+
+        # Create new paragraphs from the split parts
+        new_paragraphs = []
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+
+            # Remove opening/closing <p> tags from the part if present
+            part = re.sub(r'^<p[^>]*>', '', part, flags=re.IGNORECASE)
+            part = re.sub(r'</p>$', '', part, flags=re.IGNORECASE)
+            part = part.strip()
+
+            if not part:
+                continue
+
+            # Parse the part as HTML and create new paragraph
+            temp_soup = BeautifulSoup(f'<p>{part}</p>', 'html.parser')
+            new_p = temp_soup.find('p')
+
+            # Only add if paragraph has actual text content
+            if new_p and new_p.get_text(strip=True):
+                new_paragraphs.append(new_p)
+
+        # Replace original paragraph with new ones
+        if len(new_paragraphs) > 1:
+            for new_p in reversed(new_paragraphs):
+                p.insert_after(new_p)
+            p.decompose()
+
+def format_html_with_newlines(element, indent=0):
+    """
+    Recursively format HTML with newlines after closing tags.
+    Does not add spaces inside tags to avoid affecting text rendering.
+    """
+    if isinstance(element, NavigableString):
+        return str(element)
+
+    indent_str = "  " * indent
+    tag_name = element.name
+
+    # Self-closing tags
+    if tag_name in ['br', 'hr', 'img', 'input', 'meta', 'link']:
+        attrs = ''.join([f' {k}="{v}"' if v else f' {k}' for k, v in element.attrs.items()])
+        return f"{indent_str}<{tag_name}{attrs}>\n"
+
+    # Build opening tag
+    attrs = ''.join([f' {k}="{v}"' if isinstance(v, str) else f' {k}="{" ".join(v)}"' for k, v in element.attrs.items()])
+    opening = f"{indent_str}<{tag_name}{attrs}>"
+
+    # Inline elements - keep content on same line
+    if tag_name in ['strong', 'em', 'a', 'span', 'sup', 'sub']:
+        content = ''.join([format_html_with_newlines(child, 0) if isinstance(child, Tag) else str(child) for child in element.children])
+        return f"{opening}{content}</{tag_name}>"
+
+    # Block elements - add newlines
+    children_html = []
+    for child in element.children:
+        if isinstance(child, Tag):
+            children_html.append(format_html_with_newlines(child, indent + 1))
+        elif isinstance(child, NavigableString) and str(child).strip():
+            # Only include non-empty text nodes
+            children_html.append(str(child))
+
+    if not children_html:
+        return f"{opening}</{tag_name}>\n"
+
+    # For elements that contain only inline content, keep on same line
+    if tag_name in ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6', 'li', 'td', 'th']:
+        content = ''.join(children_html)
+        return f"{opening}{content}</{tag_name}>\n"
+
+    # For container elements, put children on new lines
+    content = '\n' + '\n'.join(children_html) + indent_str
+    return f"{opening}{content}</{tag_name}>\n"
+
+def clean_html_simple(raw_html):
+    """
+    Simple processing for unformatted documents without the 'Begin writing' marker.
+    Rules:
+    1. Remove first paragraph with bold 13pt text (title)
+    2. Convert paragraphs with ONLY bold 13pt text to H2 headings
+    3. For mixed paragraphs, split bold 13pt text into H2 headings and keep rest as paragraphs
+    """
+    soup = BeautifulSoup(raw_html, "html.parser")
+
+    # Get the body
+    body = soup.body if soup.body else soup
+
+    # Split paragraphs at <br><br> boundaries FIRST, before any other processing
+    # This must happen immediately while <br> tags still exist in raw HTML
+    split_paragraphs_at_double_br(soup)
+
+    # Find all paragraphs
+    all_paragraphs = body.find_all('p')
+
+    # Track if we've removed the title
+    title_removed = False
+
+    for p in list(all_paragraphs):
+        text = p.get_text(strip=True)
+        if not text:
+            p.decompose()
+            continue
+
+        # Find all spans with bold 13pt text
+        all_spans = p.find_all('span')
+
+        # Calculate total text length and collect bold 13pt spans
+        total_text_length = len(text)
+        bold_13pt_spans = []  # List of (span_element, text)
+        regular_spans = []  # List of (span_element, text)
+
+        for span in all_spans:
+            style = span.get('style', '')
+            span_text = span.get_text(strip=True)
+
+            if not span_text:
+                continue
+
+            # Check if this span is bold 13pt
+            is_bold = 'font-weight:700' in style or 'font-weight: 700' in style
+            is_13pt = 'font-size:13pt' in style or 'font-size: 13pt' in style or 'font-size:14pt' in style
+
+            if is_bold and is_13pt:
+                bold_13pt_spans.append((span, span_text))
+            else:
+                regular_spans.append((span, span_text))
+
+        # If there's no bold 13pt text, this is just a regular paragraph - leave it alone
+        if not bold_13pt_spans:
+            continue
+
+        combined_bold_text = ' '.join([text for _, text in bold_13pt_spans])
+
+        # Check if the paragraph is ENTIRELY (or almost entirely) bold 13pt text
+        # Use 95% threshold to account for minor whitespace differences
+        is_entirely_bold = len(combined_bold_text) >= total_text_length * 0.95
+
+        if is_entirely_bold:
+            if not title_removed:
+                # Remove the first bold paragraph (title)
+                p.decompose()
+                title_removed = True
+            else:
+                # Convert to H2 heading
+                h2 = soup.new_tag('h2')
+                h2.string = combined_bold_text
+                p.replace_with(h2)
+        else:
+            # Mixed paragraph - split it
+            # Build list of content in order
+            content_order = []
+            for child in p.children:
+                if isinstance(child, str):
+                    stripped = child.strip()
+                    if stripped:
+                        content_order.append(('text', stripped))
+                elif hasattr(child, 'name') and child.name == 'span':
+                    style = child.get('style', '')
+                    child_text = child.get_text(strip=True)
+
+                    if not child_text:
+                        continue
+
+                    is_bold = 'font-weight:700' in style or 'font-weight: 700' in style
+                    is_13pt = 'font-size:13pt' in style or 'font-size: 13pt' in style or 'font-size:14pt' in style
+
+                    if is_bold and is_13pt:
+                        content_order.append(('bold13pt', child_text))
+                    else:
+                        content_order.append(('text', child_text))
+
+            # Build new elements
+            new_elements = []
+            current_text = []
+
+            for content_type, content_value in content_order:
+                if content_type == 'bold13pt':
+                    # Save any accumulated text as a paragraph
+                    if current_text:
+                        new_p = soup.new_tag('p')
+                        new_p.string = ' '.join(current_text)
+                        new_elements.append(new_p)
+                        current_text = []
+
+                    # Add the bold text as heading or skip if title
+                    if not title_removed:
+                        title_removed = True
+                        # Skip - this is the title
+                    else:
+                        h2 = soup.new_tag('h2')
+                        h2.string = content_value
+                        new_elements.append(h2)
+                else:
+                    current_text.append(content_value)
+
+            # Add any remaining text
+            if current_text:
+                new_p = soup.new_tag('p')
+                new_p.string = ' '.join(current_text)
+                new_elements.append(new_p)
+
+            # Replace the paragraph with new elements
+            if new_elements:
+                for elem in reversed(new_elements):
+                    p.insert_after(elem)
+                p.decompose()
+
+    # Paragraph splitting already done at the beginning of this function
+
+    # Remove Notes section
+    remove_notes_section(soup)
+
+    # Remove empty paragraphs
+    for p in body.find_all('p'):
+        if not p.get_text(strip=True):
+            p.decompose()
+
+    # Now convert bold/italic spans to semantic tags (for remaining paragraphs)
+    convert_bold_italic_spans(soup)
+
+    # Strip all styles and attributes
+    for style_tag in body.find_all("style"):
+        style_tag.decompose()
+    for tag in body.find_all(True):
+        # Only keep href for links
+        if tag.name == 'a' and tag.get('href'):
+            tag.attrs = {'href': tag['href']}
+        else:
+            tag.attrs = {}
+
+    # Unwrap remaining spans and fonts
+    for tag in list(body.find_all(["span", "font"])):
+        try:
+            tag.unwrap()
+        except:
+            pass
+
+    # Fix Google redirect links
+    fix_google_redirect_links(soup)
+    fix_specific_links(soup)
+
+    # Get final content
+    content_elements = list(body.children) if body else []
+
+    # CSS styles to prepend
+    css_styles = """<style>
+
+    .blog-content {
+        line-height: 1.6;
+        font-size: 1rem;
+        color: #222;
+    }
+
+    /* Reset defaults */
+    .blog-content h1,
+    .blog-content h2,
+    .blog-content h3,
+    .blog-content h4,
+    .blog-content h5,
+    .blog-content h6,
+    .blog-content p,
+    .blog-content ul,
+    .blog-content ol,
+    .blog-content table {
+        margin: 0;
+        padding: 0;
+    }
+
+    /* H1 styled as paragraph to avoid duplicate H1s on Shopify */
+    .blog-content p.h1 {
+        margin: 30px 0;
+        font-size: 40px;
+        font-weight: 700;
+        font-family: var(--heading-font);
+    }
+
+    /* Table styles */
+    .blog-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+    }
+
+    .blog-content td,
+    .blog-content th {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+
+    .blog-content tr:first-child td,
+    .blog-content tr:first-child th {
+        background-color: #f8f8f8;
+        font-weight: bold;
+    }
+
+    /* Consistent vertical rhythm */
+    .blog-content h2 + *,
+    .blog-content h3 + *,
+    .blog-content h4 + *,
+    .blog-content h5 + *,
+    .blog-content h6 + *,
+    .blog-content p + *,
+    .blog-content ul + *,
+    .blog-content ol + *,
+    .blog-content table + * {
+        margin-top: 1em;
+    }
+
+    /* Slightly tighter after headings */
+    .blog-content h2 + *,
+    .blog-content h3 + * {
+        margin-top: 0.6em;
+    }
+
+    /* List styles */
+    .blog-content ul {
+        padding-left: 20px;
+        margin: 0.5em 0;
+    }
+
+    .blog-content li {
+        list-style-type: circle;
+        padding-bottom: 0.3em;
+    }
+
+    .blog-content li:last-child {
+        padding-bottom: 0;
+    }
+
+    /* Numbered list styling (for converted <ol> tags) */
+    .blog-content ul.numberedList {
+        list-style-type: decimal;
+    }
+
+    .blog-content ul.numberedList li {
+        list-style-type: decimal;
+    }
+
+    /* Additional spacing fixes */
+    .blog-content * + p,
+    .blog-content table + p {
+        margin-top: 1em;
+    }
+
+    .blog-content p:empty {
+        display: none;
+    }
+
+    /* Link styles */
+    .blog-content a {
+        color: #0645ad;
+        text-decoration: underline;
+    }
+
+    .blog-content a:visited {
+        color: #0b0080;
+    }
+
+    .blog-content a:hover,
+    .blog-content a:focus {
+        color: #3366cc;
+        text-decoration: underline;
+    }
+
+</style>
+"""
+
+    # Build formatted HTML output manually
+    html_parts = [css_styles]
+    html_parts.append('<div class="blog-content">\n')
+
+    # Format each child element
+    for element in content_elements:
+        if isinstance(element, Tag):
+            html_parts.append(format_html_with_newlines(element, 1))
+        elif isinstance(element, NavigableString) and str(element).strip():
+            html_parts.append(str(element))
+
+    html_parts.append('</div>\n')
+
+    html_output = ''.join(html_parts)
+    return html_output
+
 def clean_html(raw_html):
     soup = BeautifulSoup(raw_html, "html.parser")
 
+    # First, check if this is a formatted document with the marker
+    has_marker = remove_everything_before_marker(soup)
+
+    # If no marker was found, use simple processing
+    if not has_marker:
+        return clean_html_simple(raw_html)
+
+    # FORMATTED DOCUMENT PROCESSING (with "Begin writing" marker)
+    # Now convert bold/italic spans to semantic tags and strip styles
     convert_bold_italic_spans(soup)
     strip_styles_and_attributes(soup)
-    remove_everything_before_marker(soup)
+
     normalize_heading_markers(soup)
     flatten_nested_headings(soup)
     unwrap_headings_from_paragraphs(soup)
@@ -691,8 +1214,150 @@ def clean_html(raw_html):
     fix_strong_in_list_items(soup)  # Ensure space after strong tags in list items
     normalize_link_spacing(soup)  # Ensure consistent spacing around links
 
-    # Use str() instead of prettify() to avoid adding extra whitespace
-    html_output = str(soup)
+    # Get the body content or the whole soup if no body
+    body = soup.body if soup.body else soup
+
+    # Extract only the content, not the body tag itself
+    content_elements = list(body.children) if body else []
+
+    # CSS styles to prepend
+    css_styles = """<style>
+
+    .blog-content {
+        line-height: 1.6;
+        font-size: 1rem;
+        color: #222;
+    }
+
+    /* Reset defaults */
+    .blog-content h1,
+    .blog-content h2,
+    .blog-content h3,
+    .blog-content h4,
+    .blog-content h5,
+    .blog-content h6,
+    .blog-content p,
+    .blog-content ul,
+    .blog-content ol,
+    .blog-content table {
+        margin: 0;
+        padding: 0;
+    }
+
+    /* H1 styled as paragraph to avoid duplicate H1s on Shopify */
+    .blog-content p.h1 {
+        margin: 30px 0;
+        font-size: 40px;
+        font-weight: 700;
+        font-family: var(--heading-font);
+    }
+
+    /* Table styles */
+    .blog-content table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 1em 0;
+    }
+
+    .blog-content td,
+    .blog-content th {
+        border: 1px solid #ddd;
+        padding: 8px;
+        text-align: left;
+    }
+
+    .blog-content tr:first-child td,
+    .blog-content tr:first-child th {
+        background-color: #f8f8f8;
+        font-weight: bold;
+    }
+
+    /* Consistent vertical rhythm */
+    .blog-content h2 + *,
+    .blog-content h3 + *,
+    .blog-content h4 + *,
+    .blog-content h5 + *,
+    .blog-content h6 + *,
+    .blog-content p + *,
+    .blog-content ul + *,
+    .blog-content ol + *,
+    .blog-content table + * {
+        margin-top: 1em;
+    }
+
+    /* Slightly tighter after headings */
+    .blog-content h2 + *,
+    .blog-content h3 + * {
+        margin-top: 0.6em;
+    }
+
+    /* List styles */
+    .blog-content ul {
+        padding-left: 20px;
+        margin: 0.5em 0;
+    }
+
+    .blog-content li {
+        list-style-type: circle;
+        padding-bottom: 0.3em;
+    }
+
+    .blog-content li:last-child {
+        padding-bottom: 0;
+    }
+
+    /* Numbered list styling (for converted <ol> tags) */
+    .blog-content ul.numberedList {
+        list-style-type: decimal;
+    }
+
+    .blog-content ul.numberedList li {
+        list-style-type: decimal;
+    }
+
+    /* Additional spacing fixes */
+    .blog-content * + p,
+    .blog-content table + p {
+        margin-top: 1em;
+    }
+
+    .blog-content p:empty {
+        display: none;
+    }
+
+    /* Link styles */
+    .blog-content a {
+        color: #0645ad;
+        text-decoration: underline;
+    }
+
+    .blog-content a:visited {
+        color: #0b0080;
+    }
+
+    .blog-content a:hover,
+    .blog-content a:focus {
+        color: #3366cc;
+        text-decoration: underline;
+    }
+
+</style>
+"""
+
+    # Build formatted HTML output manually
+    html_parts = [css_styles]
+    html_parts.append('<div class="blog-content">\n')
+
+    # Format each child element
+    for element in content_elements:
+        if isinstance(element, Tag):
+            html_parts.append(format_html_with_newlines(element, 1))
+        elif isinstance(element, NavigableString) and str(element).strip():
+            html_parts.append(str(element))
+
+    html_parts.append('</div>\n')
+
+    html_output = ''.join(html_parts)
     return html_output
 
 # ==== DRIVE CONVERSION ====
