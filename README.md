@@ -1,162 +1,329 @@
-# DPP Blog Converter - Setup Guide
+# DPP Blog Converter
 
-Convert .docx blog files to clean, formatted HTML using Google Docs API.
+Convert .docx blog files to clean, formatted HTML using Google Docs API with an easy-to-use desktop application.
+
+![Version](https://img.shields.io/badge/version-1.0-blue)
+![Python](https://img.shields.io/badge/python-3.8+-green)
+![License](https://img.shields.io/badge/license-MIT-lightgrey)
+
+## 📋 Table of Contents
+
+- [Features](#features)
+- [Installation](#installation)
+  - [Option 1: Download Pre-Built Executable (Recommended)](#option-1-download-pre-built-executable-recommended)
+  - [Option 2: Run from Source](#option-2-run-from-source)
+  - [Option 3: Build Your Own Executable](#option-3-build-your-own-executable)
+- [Google API Setup](#google-api-setup)
+- [Usage](#usage)
+- [Project Structure](#project-structure)
+- [Contributing](#contributing)
+
+---
+
+## ✨ Features
+
+- **Automated Conversion**: Upload .docx files to Google Drive, export as HTML, and clean automatically
+- **Smart HTML Cleaning**: Removes excess formatting while preserving:
+  - Bold text and semantic formatting
+  - Headings (H1-H6)
+  - Lists (bulleted and numbered)
+  - Tables with proper styling
+  - Links
+- **Two Document Formats Supported**:
+  - Formatted documents (with "Begin writing" marker)
+  - Unformatted documents (automatic heading detection)
+- **Automatic Tag Generation**: AI-powered tag suggestion based on content
+- **User-Friendly GUI**:
+  - Setup wizard for first-time users
+  - Real-time progress tracking
+  - Status updates during conversion
+  - One-click "Copy HTML" to clipboard
+- **Standalone Application**: No Python installation required for end users
 
 ---
 
-## 🔑 IMPORTANT: Get Your Google API Credentials
+## 🚀 Installation
 
-Before you can convert files, you need to download a `client_secret.json` file from Google. Follow these steps carefully:
+### Option 1: Download Pre-Built Executable (Recommended)
 
-### Step 1: Go to Google Cloud Console
+**For End Users (No Python Required)**
 
-Visit: **https://console.cloud.google.com/**
+1. Download `DPPBlogConvert.exe` from the [Releases](https://github.com/DieselMikeK/convertblog/releases) page
+2. Run the executable - that's it! No installation needed.
+3. On first run, you'll be guided through the setup process
 
-### Step 2: Create a New Project
+> **Note**: Windows may show a security warning. This is normal for unsigned executables. Click "More info" → "Run anyway"
 
-1. Click **"Select a project"** at the top of the page
-2. Click **"NEW PROJECT"**
-3. Give it a name like **"Blog Converter"** or **"DPP Blog Tool"**
-4. Click **"CREATE"**
-5. Wait a few seconds for the project to be created
+### Option 2: Run from Source
 
-### Step 3: Enable Google Drive API
+**For Developers**
 
-1. Make sure your new project is selected at the top
-2. In the left sidebar, click **"APIs & Services"** → **"Library"**
-3. In the search box, type: **"Google Drive API"**
-4. Click on **"Google Drive API"** in the results
-5. Click the blue **"ENABLE"** button
-6. Wait for it to enable (takes a few seconds)
+1. **Clone the repository**:
+   ```bash
+   git clone https://github.com/DieselMikeK/convertblog.git
+   cd convertblog
+   ```
 
-### Step 4: Set Up OAuth Consent Screen
+2. **Install Python 3.8 or higher**:
+   - Download from [python.org](https://www.python.org/downloads/)
+   - Make sure to check "Add Python to PATH" during installation
 
-1. Go to **"APIs & Services"** → **"OAuth consent screen"** (in the left sidebar)
-2. Select **"External"** user type (unless you have a Google Workspace account)
-3. Click **"CREATE"**
-4. Fill in the required information:
-   - **App name:** `DPP Blog Converter`
-   - **User support email:** Select your email from the dropdown
-   - **Developer contact email:** Enter your email
-5. Click **"SAVE AND CONTINUE"**
-6. On the "Scopes" page, just click **"SAVE AND CONTINUE"** (no changes needed)
-7. On the "Test users" page, click **"+ ADD USERS"**
-8. Enter your email address (the one you'll use to authenticate)
-9. Click **"ADD"**
-10. Click **"SAVE AND CONTINUE"**
-11. Review and click **"BACK TO DASHBOARD"**
+3. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt
+   ```
 
-### Step 5: Create OAuth Client ID Credentials
+4. **Run the application**:
+   ```bash
+   python blog_converter_gui.py
+   ```
 
-1. Go to **"APIs & Services"** → **"Credentials"** (in the left sidebar)
-2. Click the blue **"+ CREATE CREDENTIALS"** button at the top
-3. Select **"OAuth client ID"**
-4. For "Application type", select: **"Desktop app"**
-5. Give it a name like: **"Blog Converter Desktop"**
-6. Click **"CREATE"**
+### Option 3: Build Your Own Executable
 
-### Step 6: Download Your Credentials
+**For Creating a Distributable .exe**
 
-1. A popup will appear showing your Client ID and Client Secret
-2. Click the **"DOWNLOAD JSON"** button
-3. A file will download with a long name like: `client_secret_123456789-abcdefg.apps.googleusercontent.com.json`
+1. Follow steps 1-3 from "Option 2: Run from Source"
 
-### Step 7: Rename and Place the File
+2. **Build with PyInstaller**:
+   ```bash
+   pyinstaller DPPBlogConvert.spec
+   ```
 
-**THIS IS CRITICAL:**
+3. **Find your executable**:
+   - Location: `dist/DPPBlogConvert.exe`
+   - Size: ~40 MB (includes all dependencies)
 
-1. Find the downloaded file (usually in your Downloads folder)
-2. **Rename it to exactly:** `client_secret.json` (all lowercase, no extra numbers)
-3. **Move it to this folder:** `DPPBlogBuilder` (the same folder where this README is located)
-
-The file should be at:
-```
-DPPBlogBuilder/client_secret.json
-```
+4. **Distribute**:
+   - Copy `DPPBlogConvert.exe` to share with others
+   - No other files needed!
 
 ---
+
+## 🔑 Google API Setup
+
+Before you can convert files, you need Google API credentials. This is a **one-time setup**:
+
+### Step 1: Create a Google Cloud Project
+
+1. Go to [Google Cloud Console](https://console.cloud.google.com/)
+2. Click **"Select a project"** → **"NEW PROJECT"**
+3. Name it (e.g., "Blog Converter") and click **"CREATE"**
+
+### Step 2: Enable Google Drive API
+
+1. Make sure your project is selected
+2. Go to **"APIs & Services"** → **"Library"**
+3. Search for **"Google Drive API"**
+4. Click **"ENABLE"**
+
+### Step 3: Configure OAuth Consent Screen
+
+1. Go to **"APIs & Services"** → **"OAuth consent screen"**
+2. Select **"External"** user type → **"CREATE"**
+3. Fill in required fields:
+   - **App name**: `DPP Blog Converter`
+   - **User support email**: Your email
+   - **Developer contact email**: Your email
+4. Click **"SAVE AND CONTINUE"** through all screens
+5. On "Test users" page, add your email address
+
+### Step 4: Create Credentials
+
+1. Go to **"APIs & Services"** → **"Credentials"**
+2. Click **"+ CREATE CREDENTIALS"** → **"OAuth client ID"**
+3. Select **"Desktop app"** as application type
+4. Name it (e.g., "Blog Converter Desktop")
+5. Click **"CREATE"**
+
+### Step 5: Download Credentials
+
+1. Click **"DOWNLOAD JSON"** on the popup
+2. **Rename the file to**: `client_secret.json`
+3. **Move it to**: Your DPPBlogBuilder folder (created during first run)
+
+### First-Time Authentication
 
 The first time you click "Convert":
+1. A browser window will open automatically
+2. Log in with your Google account
+3. You may see: **"Google hasn't verified this app"**
+   - This is normal! Click **"Advanced"** → **"Go to [App Name] (unsafe)"**
+4. Click **"Allow"** to grant access
+5. Close the browser and return to the app
 
-1. **A browser window will automatically open**
-2. **Log in with your Google account** (the one you added as a test user)
-3. You may see a warning: **"Google hasn't verified this app"**
-   - This is normal! It's your own app.
-   - Click **"Advanced"** → **"Go to Blog Converter (unsafe)"**
-4. Click **"Allow"** to grant the app access to Google Drive
-5. The browser will show "The authentication flow has completed"
-6. **Close the browser** and return to the converter
-
-The app saves your authentication, so you only need to do this once!
+Your authentication is saved in `token.pickle` - you only do this once!
 
 ---
 
-## 📝 How to Use the Converter
+## 📖 Usage
 
-Once you have `client_secret.json` in place:
+### Quick Start
 
-1. **Add .docx files** to the `todo` folder inside DPPBlogBuilder
-2. **Open DPPBlogConvert.exe** (or it's already open)
-3. **Click the "Convert" button**
-4. Watch the progress in real-time
-5. When complete, your HTML files are in the **`output_html`** folder
-6. Click **"Open Output Folder"** to see them
+1. **Run the Application**:
+   - Double-click `DPPBlogConvert.exe` (or run `python blog_converter_gui.py`)
+
+2. **First-Time Setup**:
+   - Click **"Setup New Project"**
+   - Choose a location (e.g., Desktop)
+   - A `DPPBlogBuilder` folder will be created with:
+     ```
+     DPPBlogBuilder/
+     ├── todo/              ← Put your .docx files here
+     ├── output_html/       ← Your converted HTML appears here
+     ├── raw_html/          ← Raw HTML (for debugging)
+     ├── docx/              ← Archive folder
+     ├── client_secret.json ← Add this (from Google Cloud)
+     ├── token.pickle       ← Auto-generated
+     ├── README.md          ← Instructions
+     └── Tags.txt           ← Tag template
+     ```
+
+3. **Add Your Credentials**:
+   - Place `client_secret.json` in the `DPPBlogBuilder` folder
+
+4. **Convert Your Files**:
+   - Add `.docx` files to the `todo` folder
+   - Click **"Convert"**
+   - Watch the real-time progress
+   - Find your HTML in `output_html/[blog-name]/`
+
+5. **Use Your HTML**:
+   - Click **"Copy HTML"** to copy to clipboard
+   - Paste into your blog editor
+   - Tags are saved in `tags.txt` in each blog folder
+
+### Converting Multiple Files
+
+The converter processes all `.docx` files in the `todo` folder in one batch:
+- Progress bar shows completion percentage
+- Status window displays real-time updates
+- Each file gets its own folder in `output_html/`
+
+### Understanding Output Folders
+
+Each converted blog creates a folder with:
+```
+output_html/
+└── blog-name/
+    ├── blog-name.html  ← Cleaned HTML
+    └── tags.txt        ← Suggested tags
+```
 
 ---
 
-## 📁 Folder Structure
+## 📁 Project Structure
 
 ```
-DPPBlogBuilder/
-├── todo/              ← PUT YOUR .DOCX FILES HERE
-├── output_html/       ← YOUR HTML FILES APPEAR HERE
-├── raw_html/          ← Raw HTML (for debugging)
-├── docx/              ← Archive folder (optional)
-├── client_secret.json ← YOUR GOOGLE CREDENTIALS (you download this)
-├── token.pickle       ← Saved login (auto-generated, don't touch)
-├── convert_blog.py    ← Conversion script (bundled)
-├── README.md          ← This file
-└── Tags.txt           ← Blog tags template
+convertblog/
+├── blog_converter_gui.py    # Main GUI application
+├── convert_blog.py           # Conversion logic and HTML cleaning
+├── tagFinder.py              # Automatic tag generation
+├── DPPBlogConvert.spec       # PyInstaller build configuration
+├── requirements.txt          # Python dependencies
+├── README.md                 # User setup guide
+├── README_GITHUB.md          # This file (GitHub installation)
+├── BUILD_INSTRUCTIONS.md     # How to build the executable
+├── Tags.txt                  # Default tag list
+├── header.png                # UI header image
+├── icon.png                  # Application icon
+├── icon.ico                  # Windows executable icon
+└── dist/
+    └── DPPBlogConvert.exe    # Built executable
 ```
 
 ---
 
-## ❓ Troubleshooting
+## 🛠️ Requirements
 
-### Error: "client_secret.json not found"
-- Make sure you downloaded the credentials from Google Cloud Console
-- Make sure you renamed it to exactly `client_secret.json`
-- Make sure it's in the `DPPBlogBuilder` folder (not in a subfolder)
+### For Running from Source:
+- Python 3.8 or higher
+- Dependencies (installed via `requirements.txt`):
+  - `google-api-python-client>=2.0.0`
+  - `google-auth>=2.0.0`
+  - `google-auth-oauthlib>=0.5.0`
+  - `google-auth-httplib2>=0.1.0`
+  - `beautifulsoup4>=4.9.0`
+  - `pillow>=9.0.0`
 
-### Error: "No .docx files found in todo folder"
-- Make sure your Word files are in the `todo` folder
-- Make sure they have the `.docx` extension (not `.doc`)
+### For Building Executable:
+- All of the above, plus:
+  - `pyinstaller>=5.0.0`
+
+### For End Users (Pre-Built .exe):
+- **Nothing!** Just Windows 10/11
+
+---
+
+## 🐛 Troubleshooting
+
+### "client_secret.json not found"
+- Make sure you downloaded credentials from Google Cloud Console
+- Rename to exactly `client_secret.json` (lowercase, no extra numbers)
+- Place in the `DPPBlogBuilder` folder
+
+### "No .docx files found"
+- Check files are in the `todo` folder
+- Make sure they have `.docx` extension (not `.doc`)
 
 ### Browser doesn't open for authentication
 - Make sure you have a default browser set
-- Try running the converter as administrator
-- Check if your firewall is blocking it
-
-### Authentication expires
-- Delete the `token.pickle` file
-- Run the converter again
-- You'll be asked to authenticate again in the browser
+- Try running as administrator
+- Check firewall settings
 
 ### Conversion fails or produces errors
-- Check that your .docx file isn't corrupted (try opening it in Word)
+- Verify your .docx file isn't corrupted
 - Make sure you're connected to the internet
-- Look at the status messages for specific error details
+- Check the status messages for specific errors
+
+### Authentication expires
+- Delete `token.pickle` file
+- Run the converter again
+- Re-authenticate in the browser
 
 ---
 
-## 🎉 You're Ready!
+## 🤝 Contributing
 
-Once you have `client_secret.json` in the DPPBlogBuilder folder, you're all set!
+Contributions are welcome! Please feel free to submit issues or pull requests.
 
-Just add .docx files to the `todo` folder and click Convert.
+### Development Setup
+
+1. Fork the repository
+2. Clone your fork: `git clone https://github.com/YOUR-USERNAME/convertblog.git`
+3. Create a branch: `git checkout -b feature/your-feature-name`
+4. Make your changes
+5. Test thoroughly
+6. Commit: `git commit -m "Add your feature"`
+7. Push: `git push origin feature/your-feature-name`
+8. Open a Pull Request
 
 ---
 
-**Questions?** Contact your DPP Blog Converter administrator.
+## 📝 License
 
-**Version:** 1.0
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+---
+
+## 👤 Author
+
+**Mike K** - [DieselMikeK](https://github.com/DieselMikeK)
+
+---
+
+## 🙏 Acknowledgments
+
+- Uses Google Drive API for document conversion
+- BeautifulSoup4 for HTML parsing and cleaning
+- PyInstaller for executable creation
+
+---
+
+## 📧 Support
+
+For issues, questions, or feature requests, please [open an issue](https://github.com/DieselMikeK/convertblog/issues) on GitHub.
+
+---
+
+**Version**: 1.0
+**Last Updated**: December 2024
